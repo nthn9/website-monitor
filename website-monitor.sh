@@ -1,6 +1,4 @@
 #!/bin/bash
-set -e # Exit on errors
-trap 'echo "Error on line $LINENO"; exit 1' ERR # Track line error
 
 # --- VARS ---
 valid_url="^(https?:\/\/)?([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(/.*)?$"
@@ -20,29 +18,29 @@ if ! [[ ${webiste_URL} =~ ${valid_url} ]]; then
     exit 1
 fi
 
-# --- URL TEST ---
+curl -s -o /dev/null ${webiste_URL}
+curl_exit=$? 
 
-status_FULL=$(curl -m 10 -s --head  --request GET ${webiste_URL} | grep -E "^HTTP")
-status_CODE=$(echo $status_FULL | grep -oE '[0-9]{3}')
-if [[ ${status_CODE} =~ ^[0-9]+$ ]] && [[ "${status_CODE}" -lt 400 ]]; then
-    echo "${check_time}: ${webiste_NAME} is UP, status code: ${status_FULL}" >> ${log_file}
-elif [[ ${status_CODE} =~ ^[0-9]+$ ]] && [[ "${status_CODE}" -ge 400 ]]; then
-        echo "${check_time}: ${webiste_NAME} is DOWN" >> ${log_file}
-else
-    if ping -c 1 1.1.1.1 &> /dev/null && host ${webiste_NAME} &> /dev/null && ! ping -c 1 $webiste_URL &> /dev/null; then 
-        echo "${check_time}: It seems that the web server is fully down, not answering with http protocol and ICMP package" >> ${log_file}
-    elif ping -c 1 1.1.1.1 &> /dev/null && ! host ${webiste_NAME} &> /dev/null; then
-        echo "${check_time}: There is something wrong with domain, is the domain ${webiste_NAME} real?" >> ${log_file}
+# --- URL TEST ---
+# At first, testing an internet connection pinging cloudflare and google.
+if (ping -c 1 1.1.1.1 &> /dev/null || ping -c 1 8.8.8.8 &> /dev/null) then 
+    if (host -W 1 ${webiste_NAME} &> /dev/null); then
+        if [ "${curl_exit}" -eq 0 ]; then
+            status_FULL=$(curl -m 10 -s --head  --request GET ${webiste_URL} | grep -E "^HTTP")
+            status_CODE=$(echo $status_FULL | grep -oE '[0-9]{3}')
+            if [[ ${status_CODE} =~ ^[0-9]+$ ]] && [[ "${status_CODE}" -lt 400 ]]; then
+                echo "${check_time}: ${webiste_NAME} is UP, status code: ${status_FULL}" >> ${log_file}
+            elif [[ ${status_CODE} =~ ^[0-9]+$ ]] && [[ "${status_CODE}" -ge 400 ]]; then
+                echo "${check_time}: ${webiste_NAME} is DOWN, status code: ${status_FULL}" >> ${log_file}
+            fi 
+        else
+           echo "${check_time}: curl error number: ${curl_exit}" >> ${log_file} 
+        fi
     else
-        echo "${check_time}: Do you have an internet connection?" >> ${log_file}
+        echo "${check_time}: Error: The specified domain probably does not exist. Please check the address \"${webiste_NAME}\" and try again." >> ${log_file}
     fi
+else
+    echo "${check_time}: Cloudflere (1.1.1.1) and Google (8.8.8.8) DNS not responding. Do you have an internet connection?" >> ${log_file}
 fi
 
-cat << EOF 
-    SUCCESS TEST
-    ${check_time}
-    ${status_CODE}
-    ${status_FULL}
-    $(echo "--- ---")
-    $(cat ${log_file}) 
-EOF
+cat ${log_file}
